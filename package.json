@@ -1,0 +1,40 @@
+{
+  "name": "tracevault",
+  "version": "0.1.0",
+  "description": "Collect your coding-agent sessions (Claude Code, Codex, Gemini CLI, OpenCode, Cursor and more) into a private, redacted, training-ready archive.",
+  "license": "UNLICENSED",
+  "private": true,
+  "bin": {
+    "tracevault": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.15"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "jest",
+    "start": "node --no-warnings dist/cli.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1163.0",
+    "@aws-sdk/credential-provider-ini": "^3.973.26"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.20.5",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.15",
+    "typescript": "^5.9.3"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/test"
+    ]
+  }
+}
