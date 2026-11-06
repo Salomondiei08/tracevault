@@ -26,7 +26,8 @@ export function looksLikeCode(value: string): boolean {
     /[()[\]<>]/.test(value) ||
     /^[A-Za-z_$][\w$]*(\.[\w$]+)+$/.test(value) || // process.env.X, config.auth.token
     /^\$\{?[\w.]+\}?$/.test(value) || // $VAR, ${VAR}
-    /^(true|false|null|undefined|none|string|number|boolean|required|optional|redacted|changeme|xxxxxx+|\*+)$/i.test(value)
+    /^(true|false|null|undefined|none|string|number|boolean|required|optional|redacted|changeme|bearer|basic|xxxxxx+|\*+)$/i.test(value) ||
+    /^(YOUR|MY|<)[A-Z_]*/.test(value) // placeholders like YOUR_API_KEY
   );
 }
 
@@ -45,6 +46,8 @@ export const RULES: Rule[] = [
   { name: "hf", pattern: /\bhf_[A-Za-z0-9]{30,}\b/g },
   { name: "npm", pattern: /\bnpm_[A-Za-z0-9]{36}\b/g },
   { name: "jwt", pattern: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
+  // HTTP auth headers: the token after the scheme is the secret, not the word "Bearer".
+  { name: "auth-header", pattern: /\b(Bearer|Basic|Token)\s+([A-Za-z0-9._~+/=-]{16,})/g, group: 2 },
   // user:password@host in database and broker URLs.
   { name: "url-credentials", pattern: /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)([^\s@/]{3,})(@)/gi, group: 2 },
   // KEY=value and "key": "value" where the name says it is secret.
@@ -60,8 +63,14 @@ export const RULES: Rule[] = [
   { name: "phone", pattern: /\+\d{1,3}[\s.-]?(?:\d[\s.-]?){7,12}\d\b/g },
 ];
 
-/** Values that look like secrets by randomness alone: long, mixed-character, high entropy. */
-const HIGH_ENTROPY_CANDIDATE = /\b[A-Za-z0-9+/_-]{32,}={0,2}\b/g;
+/**
+ * Values that look like secrets by randomness alone. "/" is deliberately not part of the
+ * alphabet: file paths are the most useful context in coding traces and must survive.
+ */
+const HIGH_ENTROPY_CANDIDATE = /[A-Za-z0-9_-]{32,}={0,2}/g;
+
+/** Random API tokens mix upper case, lower case and digits; slugs and path segments rarely do. */
+const looksRandom = (s: string): boolean => /[a-z]/.test(s) && /[A-Z]/.test(s) && /\d/.test(s) && entropy(s) >= 4.3;
 
 /** Shannon entropy in bits per character. */
 export function entropy(s: string): number {
@@ -112,7 +121,7 @@ export function redactText(input: string, opts: RedactOptions = {}): { text: str
   }
 
   text = text.replace(HIGH_ENTROPY_CANDIDATE, (m) => {
-    if (looksLikeHarmlessId(m) || m.includes("REDACTED") || entropy(m) < 4.3) return m;
+    if (looksLikeHarmlessId(m) || m.includes("REDACTED") || !looksRandom(m)) return m;
     count++;
     return "[REDACTED:high-entropy]";
   });

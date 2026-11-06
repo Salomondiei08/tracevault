@@ -69,3 +69,27 @@ describe("redactSession", () => {
     expect(clean.redactions).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("false positives found on real sessions", () => {
+  it("keeps file paths, including encoded project folders", () => {
+    const p = "/private/tmp/claude-501/-Users-user-Documents-Projects-aya/b434f723-81dd-4275-8cc5-c776f45bbfcd/scratchpad";
+    expect(redactText(p).text).toBe(p);
+    const q = "~/.claude/projects/-Users-user-Documents-Projects-aya-work-apps/session.jsonl";
+    expect(redactText(q).text).toBe(q);
+  });
+
+  it("redacts the token in an Authorization header, not the scheme", () => {
+    const t = "Authorization: Bearer " + "ya29" + "XyZabc123DEF456ghi789JKL";
+    const r = redactText(t).text;
+    expect(r).toContain("Bearer");
+    expect(r).not.toContain("XyZabc123DEF456ghi789JKL");
+  });
+
+  it("keeps a shell variable passed as a bearer token", () => {
+    expect(redactText('curl -H "Authorization: Bearer $T"').count).toBe(0);
+  });
+
+  it("still catches a random token without a known prefix", () => {
+    expect(redactText("token q8Zr2LmX9vPw4KtB7nHs3JdF6gYc1WeA").text).toContain("[REDACTED");
+  });
+});
