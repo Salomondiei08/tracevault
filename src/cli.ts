@@ -136,7 +136,7 @@ async function cmdSync(agents: string[], dryRun: boolean, includeActive: boolean
   console.log(`${dryRun ? "Dry run" : "Syncing"} to ${storage.describe()}`);
   const r = await sync(cfg, storage, loadState(), { agents, dryRun, includeActive, log: (l) => console.log(l) });
   console.log(
-    `\nUploaded ${r.uploaded} item(s) (${r.sessions} sessions, ${r.redactions} redactions; raw ${fmtBytes(r.bytesRaw)}, traces ${fmtBytes(r.bytesTraces)}).` +
+    `\n${dryRun ? "Would upload" : "Uploaded"} ${r.uploaded} item(s) (${r.sessions} sessions, ${r.redactions} redactions; raw ${fmtBytes(r.bytesRaw)}, traces ${fmtBytes(r.bytesTraces)}).` +
       ` Unchanged ${r.unchanged}, still active ${r.active}, excluded ${r.excluded}, failed ${r.failed.length}.`,
   );
   if (r.failed.length) process.exitCode = 1;

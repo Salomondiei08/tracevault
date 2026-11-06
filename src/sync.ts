@@ -131,7 +131,7 @@ export async function sync(cfg: Config, storage: Storage, state: State, opts: Sy
         report.redactions += traces.reduce((n, t) => n + t.session.redactions, 0);
         report.bytesRaw += raw?.length ?? 0;
         report.bytesTraces += traces.reduce((n, t) => n + t.body.length, 0);
-        log(`  ✓ ${stateKey}`);
+        if (!opts.dryRun) log(`  ✓ ${stateKey}`);
       } catch (err) {
         report.failed.push({ key: stateKey, error: (err as Error).message });
         log(`  ✗ ${stateKey}: ${(err as Error).message}`);
