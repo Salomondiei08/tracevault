@@ -34,8 +34,9 @@ Commands
   init  --gcs <bucket> | --s3 <bucket> [--endpoint URL] [--region R] [--profile P] | --local <dir>
         [--prefix P] [--contributor NAME] [--no-raw]
                                Write ~/.tracevault/config.json and create the raw-tier key.
-  sync  [--agent A]... [--dry-run] [--include-active]
-                               Upload sessions that changed since the last sync.
+  sync  [--agent A]... [--dry-run] [--include-active] [--force]
+                               Upload sessions that changed since the last sync
+                               (--force re-uploads everything, e.g. after a parser fix).
   export --out FILE [--contributor NAME | --all] [--agent A]... [--committed-only] [--min-user-turns N]
                                Write an SFT chat dataset (JSONL) from uploaded traces.
   restore <object key> --out FILE
@@ -129,12 +130,12 @@ function cmdInit(v: Record<string, string | string[] | boolean | undefined>): vo
   if (cfg.uploadRaw) console.log(`Raw-tier key: ${keyPath()}. Back it up (e.g. in a password manager): without it the raw archive cannot be read.`);
 }
 
-async function cmdSync(agents: string[], dryRun: boolean, includeActive: boolean): Promise<void> {
+async function cmdSync(agents: string[], dryRun: boolean, includeActive: boolean, force: boolean): Promise<void> {
   const cfg = requireConfig();
   if (agents.length) selectAdapters(agents); // validates names
   const storage = createStorage(cfg.storage);
   console.log(`${dryRun ? "Dry run" : "Syncing"} to ${storage.describe()}`);
-  const r = await sync(cfg, storage, loadState(), { agents, dryRun, includeActive, log: (l) => console.log(l) });
+  const r = await sync(cfg, storage, loadState(), { agents, dryRun, includeActive, force, log: (l) => console.log(l) });
   console.log(
     `\n${dryRun ? "Would upload" : "Uploaded"} ${r.uploaded} item(s) (${r.sessions} sessions, ${r.redactions} redactions; raw ${fmtBytes(r.bytesRaw)}, traces ${fmtBytes(r.bytesTraces)}).` +
       ` Unchanged ${r.unchanged}, still active ${r.active}, excluded ${r.excluded}, failed ${r.failed.length}.`,
@@ -207,6 +208,7 @@ async function main(): Promise<void> {
       "min-user-turns": { type: "string" },
       index: { type: "string" },
       fix: { type: "boolean" },
+      force: { type: "boolean" },
       hour: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
@@ -222,7 +224,7 @@ async function main(): Promise<void> {
     case "init":
       return cmdInit(values);
     case "sync":
-      return cmdSync(agents, Boolean(values["dry-run"]), Boolean(values["include-active"]));
+      return cmdSync(agents, Boolean(values["dry-run"]), Boolean(values["include-active"]), Boolean(values.force));
     case "export":
       return cmdExport(values, agents);
     case "restore":

@@ -124,6 +124,16 @@ export function parseClaudeRecords(records: Record<string, unknown>[], fallbackI
   };
 }
 
+/**
+ * Subagent transcripts (`agent-*.jsonl`) carry their parent's sessionId. Without a
+ * distinct id they would overwrite the parent's trace in storage, so the file name
+ * is appended: `<parent id>/agent-<id>`.
+ */
+export function withSubagentId(session: TraceSession, path: string): TraceSession {
+  const file = basename(path, ".jsonl");
+  return file.startsWith("agent-") ? { ...session, sessionId: `${session.sessionId}/${file}` } : session;
+}
+
 export const claudeCode: Adapter = {
   id: "claude-code",
   label: "Claude Code",
@@ -149,7 +159,7 @@ export const claudeCode: Adapter = {
     return readFileSync(item.path);
   },
   async parse(item) {
-    const session = parseClaudeRecords(readJsonl(item.path), basename(item.path, ".jsonl"));
+    const session = withSubagentId(parseClaudeRecords(readJsonl(item.path), basename(item.path, ".jsonl")), item.path);
     return session.events.length ? [session] : [];
   },
 };

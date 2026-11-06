@@ -22,6 +22,8 @@ export interface SyncOptions {
   dryRun?: boolean;
   /** Ignore the idle window (useful for a one-off full upload). */
   includeActive?: boolean;
+  /** Re-upload even unchanged items (after a parser fix). */
+  force?: boolean;
   /** Home directory to discover sessions in (defaults to the real one; tests use a fake). */
   home?: string;
   log?: (line: string) => void;
@@ -90,7 +92,7 @@ export async function sync(cfg: Config, storage: Storage, state: State, opts: Sy
         report.active++;
         continue;
       }
-      const prev = state[stateKey];
+      const prev = opts.force ? undefined : state[stateKey];
       if (prev?.fingerprint === fp && prev.traceUploaded && (prev.rawUploaded || !cfg.uploadRaw)) {
         report.unchanged++;
         continue;

@@ -142,3 +142,14 @@ describe("SFT export", () => {
     expect(line.meta).toMatchObject({ agent: "claude-code", sessionId: "abc", userInterrupts: 1 });
   });
 });
+
+describe("Claude subagent transcripts", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { withSubagentId } = require("../src/adapters/claudeCode") as typeof import("../src/adapters/claudeCode");
+  const s = parseClaudeRecords(claudeRecords, "fallback");
+
+  it("get their own id so they do not overwrite the parent session", () => {
+    expect(withSubagentId(s, "/p/abc/subagents/agent-a1b2.jsonl").sessionId).toBe("abc/agent-a1b2");
+    expect(withSubagentId(s, "/p/abc.jsonl").sessionId).toBe("abc");
+  });
+});

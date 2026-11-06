@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Adapter, SourceItem } from "../types";
-import { parseClaudeRecords } from "./claudeCode";
+import { parseClaudeRecords, withSubagentId } from "./claudeCode";
 import { findFiles, itemsFromFiles, readJsonl } from "./util";
 
 interface RawSpec {
@@ -51,7 +51,7 @@ export const rawAdapters: Adapter[] = [
     match: (n) => n.endsWith(".jsonl"),
     // Desktop agent sessions use the Claude Code transcript format; parse when it fits.
     async parse(item) {
-      const s = parseClaudeRecords(readJsonl(item.path), item.key);
+      const s = withSubagentId(parseClaudeRecords(readJsonl(item.path), item.key), item.path);
       return s.events.some((e) => e.kind === "user") ? [{ ...s, agent: "claude-desktop" }] : [];
     },
   }),
