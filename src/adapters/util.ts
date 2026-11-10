@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import type { SourceItem } from "../types";
 
 /**
@@ -96,4 +97,10 @@ export function flattenText(v: unknown): string {
 /** Caps very large tool outputs; full content stays in the raw tier. */
 export function clip(s: string, max = 20_000): string {
   return s.length <= max ? s : `${s.slice(0, max)}\n[... ${s.length - max} more characters clipped]`;
+}
+
+/** Keep SQLite optional for file-only adapters and prohibit writes to agent databases. */
+export function openReadOnlyDatabase(path: string): DatabaseSyncType {
+  const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+  return new DatabaseSync(path, { readOnly: true });
 }

@@ -12,16 +12,10 @@ import { join } from "node:path";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import type { Adapter, SourceItem, TraceEvent, TraceSession } from "../types";
 import { TRACE_FORMAT_VERSION } from "../types";
-import { clip, flattenText, obj, str } from "./util";
+import { clip, flattenText, obj, openReadOnlyDatabase, str } from "./util";
 
 const DB_RELATIVE = [".local", "share", "opencode", "opencode.db"];
 
-/** Opens the database read-only. `node:sqlite` is loaded lazily so other adapters work without it. */
-function openDb(path: string): DatabaseSyncType {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
-  return new DatabaseSync(path, { readOnly: true });
-}
 
 interface SessionExtract {
   session: Record<string, unknown>;
@@ -122,7 +116,7 @@ export const opencode: Adapter = {
   async discover(home) {
     const dbPath = join(home, ...DB_RELATIVE);
     if (!existsSync(dbPath)) return [];
-    const db = openDb(dbPath);
+    const db = openReadOnlyDatabase(dbPath);
     try {
       const rows = db
         .prepare(
@@ -136,7 +130,7 @@ export const opencode: Adapter = {
     }
   },
   async readRaw(item) {
-    const db = openDb(item.path);
+    const db = openReadOnlyDatabase(item.path);
     try {
       return Buffer.from(JSON.stringify(extract(db, item.key.replace("sessions/", ""))));
     } finally {
@@ -144,7 +138,7 @@ export const opencode: Adapter = {
     }
   },
   async parse(item) {
-    const db = openDb(item.path);
+    const db = openReadOnlyDatabase(item.path);
     try {
       const s = parseOpencodeExtract(extract(db, item.key.replace("sessions/", "")));
       return s.events.some((e) => e.kind === "user") ? [s] : [];

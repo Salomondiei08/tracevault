@@ -9,7 +9,7 @@
  */
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
+import { openReadOnlyDatabase } from "./util";
 import type { Adapter, SourceItem } from "../types";
 
 const USER_DIR = ["Library", "Application Support", "Cursor", "User"];
@@ -19,15 +19,10 @@ const GLOBAL_PREFIXES = ["composerData:", "bubbleId:", "checkpointId:", "codeBlo
 /** Keys in a workspace's `ItemTable` that hold prompt and chat history. */
 const WORKSPACE_KEYS = ["aiService.prompts", "aiService.generations", "composer.composerData", "workbench.panel.aichat.view.aichat.chatdata"];
 
-function openDb(path: string): DatabaseSyncType {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
-  return new DatabaseSync(path, { readOnly: true });
-}
 
 /** Reads the allow-listed chat rows from one database as a JSON object. */
 function extractChatRows(dbPath: string, global: boolean): Record<string, string> {
-  const db = openDb(dbPath);
+  const db = openReadOnlyDatabase(dbPath);
   const out: Record<string, string> = {};
   try {
     if (global) {
