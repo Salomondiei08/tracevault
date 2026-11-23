@@ -2,27 +2,39 @@
 /**
  * tracevault command-line interface.
  *
- *   tracevault scan                 what's on this machine (uploads nothing)
- *   tracevault preview <agent>      show a redacted session, to check what would be shared
- *   tracevault init --gcs <bucket>  choose where data goes
- *   tracevault sync                 upload new and changed sessions
- *   tracevault export --out f.jsonl build a fine-tuning dataset from uploaded traces
- *   tracevault restore <object>     decrypt a raw-tier object back to its original file
- *   tracevault doctor [--fix]       find agents that delete history
- *   tracevault schedule             run sync every night
+ *   tracevault scan                        what's on this machine (uploads nothing)
+ *   tracevault preview <agent>             show a redacted session, to check what would be shared
+ *   tracevault init --intake URL --token T configure token-scoped friend upload (--no-raw default)
+ *   tracevault init --gcs <bucket>         configure direct GCS/S3/local bucket access
+ *   tracevault sync                        upload new and changed sessions
+ *   tracevault export --out f.jsonl        build a fine-tuning dataset from uploaded traces
+ *   tracevault restore <object>            decrypt a raw-tier object back to its original file
+ *   tracevault doctor [--fix]              find agents that delete history
+ *   tracevault schedule / unschedule       install or remove nightly sync
  */
 import { writeFileSync, createWriteStream } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { ADAPTERS, selectAdapters } from "./adapters";
-import { defaultContributor, keyPath, loadConfig, loadState, saveConfig, type Config, type StorageConfig } from "./config";
+import {
+  defaultContributor,
+  keyPath,
+  loadConfig,
+  loadIntakeToken,
+  loadState,
+  saveConfig,
+  saveIntakeToken,
+  type Config,
+  type StorageConfig,
+} from "./config";
 import { decompressTrace, loadOrCreateKey, openRaw } from "./crypto";
 import { checkClaudeRetention } from "./doctor";
 import { keepSession, toSftLine } from "./export";
 import { redactSession } from "./redact";
-import { installSchedule } from "./schedule";
+import { installSchedule, uninstallSchedule } from "./schedule";
 import { createStorage } from "./storage";
+import { intakeWhoami, normalizeIntakeUrl } from "./storage/intake";
 import { sync } from "./sync";
 import type { TraceSession } from "./types";
 
@@ -31,9 +43,10 @@ const HELP = `tracevault: collect your coding-agent sessions into a private, tra
 Commands
   scan                         List agents and sessions found on this machine. Uploads nothing.
   preview <agent> [--index N]  Print one session after redaction, exactly as it would be uploaded.
-  init  --gcs <bucket> | --s3 <bucket> [--endpoint URL] [--region R] [--profile P] | --local <dir>
-        [--prefix P] [--contributor NAME] [--no-raw]
-                               Write ~/.tracevault/config.json and create the raw-tier key.
+  init  --intake <url> [--token T] [--exclude PATH]... [--deny WORD]... [--with-raw]
+        --gcs <bucket> | --s3 <bucket> [--endpoint URL] [--region R] [--profile P] | --local <dir>
+        [--prefix P] [--contributor NAME] [--no-raw] [--exclude PATH]... [--deny WORD]...
+                               Write ~/.tracevault/config.json (and intake.token / raw.key as needed).
   sync  [--agent A]... [--dry-run] [--include-active] [--force]
                                Upload sessions that changed since the last sync
                                (--force re-uploads everything, e.g. after a parser fix).
@@ -43,12 +56,13 @@ Commands
                                Decrypt a raw-tier object with your local key.
   doctor [--fix]               Check for agents configured to delete old sessions.
   schedule [--hour H]          Install a nightly sync (launchd on macOS).
+  unschedule                   Stop and remove the nightly sync job.
 `;
 
 function requireConfig(): Config {
   const cfg = loadConfig();
   if (!cfg) {
-    console.error("Not configured yet. Run `tracevault init --gcs <bucket>` (or --s3 / --local) first.");
+    console.error("Not configured yet. Run `tracevault init --intake <url>` or `--gcs <bucket>` first.");
     process.exit(1);
   }
   return cfg;
@@ -56,6 +70,10 @@ function requireConfig(): Config {
 
 const fmtBytes = (n: number): string =>
   n > 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e3).toFixed(0)} KB`;
+
+const mergeUnique = (prev: string[] | undefined, added: string[] | undefined): string[] => [
+  ...new Set([...(prev ?? []), ...(added ?? []).filter(Boolean)]),
+];
 
 async function cmdScan(): Promise<void> {
   const home = homedir();
@@ -99,10 +117,11 @@ async function cmdPreview(agent: string | undefined, index: number): Promise<voi
   }
 }
 
-function cmdInit(v: Record<string, string | string[] | boolean | undefined>): void {
+async function cmdInit(v: Record<string, string | string[] | boolean | undefined>): Promise<void> {
   let storage: StorageConfig;
   const prefix = v.prefix as string | undefined;
-  if (v.gcs) storage = { type: "gcs", bucket: String(v.gcs), prefix };
+  if (v.intake) storage = { type: "intake", url: normalizeIntakeUrl(String(v.intake)) };
+  else if (v.gcs) storage = { type: "gcs", bucket: String(v.gcs), prefix };
   else if (v.s3)
     storage = {
       type: "s3",
@@ -113,20 +132,46 @@ function cmdInit(v: Record<string, string | string[] | boolean | undefined>): vo
       profile: v.profile as string | undefined,
     };
   else if (v.local) storage = { type: "local", dir: resolve(String(v.local)) };
-  else throw new Error("Choose a destination: --gcs <bucket>, --s3 <bucket> or --local <dir>");
+  else throw new Error("Choose a destination: --intake <url>, --gcs <bucket>, --s3 <bucket> or --local <dir>");
 
   const existing = loadConfig();
+  let contributor = (v.contributor as string | undefined) ?? existing?.contributor ?? defaultContributor();
+  let uploadRaw =
+    storage.type === "intake"
+      ? Boolean(v["with-raw"]) && !v["no-raw"]
+      : v["no-raw"]
+        ? false
+        : v["with-raw"]
+          ? true
+          : (existing?.uploadRaw ?? true);
+
+  if (storage.type === "intake") {
+    const providedToken = typeof v.token === "string" ? v.token.trim() : undefined;
+    if (providedToken) saveIntakeToken(providedToken);
+    const activeToken = providedToken ?? loadIntakeToken();
+    if (activeToken) {
+      const info = await intakeWhoami(storage.url, activeToken);
+      contributor = info.contributor;
+      if (uploadRaw && !info.allowRaw) {
+        uploadRaw = false;
+        console.log("Note: intake token disallows raw tier; using redacted traces only (--no-raw).");
+      }
+    } else {
+      console.log("Warning: no intake token supplied (--token). Set one before running `tracevault sync`.");
+    }
+  }
+
   const cfg: Config = {
     storage,
-    contributor: (v.contributor as string | undefined) ?? existing?.contributor ?? defaultContributor(),
+    contributor,
     idleMinutes: existing?.idleMinutes ?? 30,
-    excludePaths: existing?.excludePaths ?? [],
-    denylist: existing?.denylist ?? [],
-    uploadRaw: v["no-raw"] ? false : (existing?.uploadRaw ?? true),
+    excludePaths: mergeUnique(existing?.excludePaths, v.exclude as string[] | undefined),
+    denylist: mergeUnique(existing?.denylist, v.deny as string[] | undefined),
+    uploadRaw,
   };
   saveConfig(cfg);
   if (cfg.uploadRaw) loadOrCreateKey(keyPath());
-  console.log(`Saved config. Destination: ${createStorage(storage).describe()}, contributor "${cfg.contributor}".`);
+  console.log(`Saved config. Destination: ${createStorage(storage).describe()}, contributor "${cfg.contributor}", uploadRaw=${cfg.uploadRaw}.`);
   if (cfg.uploadRaw) console.log(`Raw-tier key: ${keyPath()}. Back it up (e.g. in a password manager): without it the raw archive cannot be read.`);
 }
 
@@ -190,6 +235,8 @@ async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {
+      intake: { type: "string" },
+      token: { type: "string" },
       gcs: { type: "string" },
       s3: { type: "string" },
       local: { type: "string" },
@@ -199,6 +246,9 @@ async function main(): Promise<void> {
       prefix: { type: "string" },
       contributor: { type: "string" },
       "no-raw": { type: "boolean" },
+      "with-raw": { type: "boolean" },
+      exclude: { type: "string", multiple: true },
+      deny: { type: "string", multiple: true },
       agent: { type: "string", multiple: true },
       "dry-run": { type: "boolean" },
       "include-active": { type: "boolean" },
@@ -213,6 +263,10 @@ async function main(): Promise<void> {
       help: { type: "boolean", short: "h" },
     },
   });
+  if (values.help) {
+    console.log(HELP);
+    return;
+  }
   const [cmd, arg] = positionals;
   const agents = values.agent ?? [];
 
@@ -233,6 +287,9 @@ async function main(): Promise<void> {
       return cmdDoctor(Boolean(values.fix));
     case "schedule":
       console.log(installSchedule(resolve(__filename), Number(values.hour ?? 3)));
+      return;
+    case "unschedule":
+      console.log(uninstallSchedule());
       return;
     default:
       console.log(HELP);

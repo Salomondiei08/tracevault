@@ -1,10 +1,11 @@
 /**
  * Storage backends. tracevault only needs four operations, so any object store fits:
  * Google Cloud Storage, anything S3-compatible (AWS, Cloudflare R2, Contabo, Backblaze B2,
- * MinIO) or a plain local folder.
+ * MinIO), a token-scoped write-only intake server, or a plain local folder.
  */
 import type { StorageConfig } from "../config";
 import { GcsStorage } from "./gcs";
+import { IntakeStorage } from "./intake";
 import { LocalStorage } from "./local";
 import { S3Storage } from "./s3";
 
@@ -15,6 +16,11 @@ export interface Storage {
   get(key: string): Promise<Buffer>;
   /** Lists object keys (relative to the configured prefix) under `prefix`. */
   list(prefix: string): Promise<string[]>;
+}
+
+/** Error wrapper to abort `withRetry` immediately on fatal client errors (e.g., 401/403/413). */
+export class FatalStorageError extends Error {
+  readonly nonRetryable = true;
 }
 
 /** Joins a configured prefix and a key without doubled or leading slashes. */
@@ -33,6 +39,8 @@ export function createStorage(cfg: StorageConfig): Storage {
       return new S3Storage(cfg);
     case "local":
       return new LocalStorage(cfg.dir);
+    case "intake":
+      return new IntakeStorage(cfg.url);
   }
 }
 
@@ -43,6 +51,7 @@ export async function withRetry<T>(what: string, fn: () => Promise<T>, attempts 
     try {
       return await fn();
     } catch (err) {
+      if ((err as { nonRetryable?: boolean })?.nonRetryable) throw err;
       last = err;
       if (i < attempts - 1) await new Promise((r) => setTimeout(r, 1000 * 2 ** i));
     }

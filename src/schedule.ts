@@ -1,10 +1,10 @@
 /**
- * Installs a nightly sync job: a launchd agent on macOS, printed systemd units on Linux.
+ * Installs or removes a nightly sync job: a launchd agent on macOS, systemd user units on Linux.
  * Running nightly (not continuously) keeps cost and battery impact negligible, and the
  * idle window means sessions are uploaded once they are finished.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { appHome } from "./config";
@@ -55,4 +55,40 @@ and ~/.config/systemd/user/tracevault.timer with
   [Install]
   WantedBy=timers.target
 then run: systemctl --user enable --now tracevault.timer`;
+}
+
+/** Stops and removes the nightly sync schedule on macOS, or disables/prints removal steps on Linux. */
+export function uninstallSchedule(): string {
+  if (platform() === "darwin") {
+    const plist = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
+    const uid = String(process.getuid?.() ?? "");
+    try {
+      execFileSync("launchctl", ["bootout", `gui/${uid}/${LABEL}`], { stdio: "ignore" });
+    } catch {
+      /* not loaded */
+    }
+    if (existsSync(plist)) {
+      unlinkSync(plist);
+      return `Removed nightly sync job (${plist}).`;
+    }
+    return `No nightly sync plist found at ${plist}.`;
+  }
+  const unitDir = join(homedir(), ".config", "systemd", "user");
+  const timer = join(unitDir, "tracevault.timer");
+  const service = join(unitDir, "tracevault.service");
+  try {
+    execFileSync("systemctl", ["--user", "disable", "--now", "tracevault.timer"], { stdio: "ignore" });
+  } catch {
+    /* systemd user session unavailable or timer not enabled */
+  }
+  let removed = false;
+  for (const file of [timer, service]) {
+    if (existsSync(file)) {
+      unlinkSync(file);
+      removed = true;
+    }
+  }
+  return removed
+    ? `Disabled tracevault.timer and removed unit files in ${unitDir}.`
+    : `To remove manually on Linux, run: systemctl --user disable --now tracevault.timer && rm -f ${timer} ${service}`;
 }

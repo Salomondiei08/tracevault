@@ -117,6 +117,22 @@ npm run build
 
 Adding an agent: write an `Adapter` (see `src/types.ts`) in `src/adapters/` and register it in `src/adapters/index.ts`. If you don't have a parser yet, a `rawFileAdapter` entry in `src/adapters/rawFiles.ts` is enough to start archiving.
 
+## Sharing safely with friends (intake or local mode)
+
+Friends can run directly with **`npx github:Salomondiei08/tracevault`** (Node.js >=22.15) using either:
+- **Zero-server local export (`--local --no-raw`)**: writes scrubbed traces into a local folder they can inspect before sharing.
+- **Automated intake upload (`--intake`, [`intake/`](intake/README.md))**: validates per-friend bearer tokens and issues short-lived GCS V4 signed PUT URLs locked to `contributors/<token-owner>/` with `--no-raw` enforcement.
+
+See [`docs/FRIENDS_GUIDE.md`](docs/FRIENDS_GUIDE.md) for the full friend checklist:
+
+```bash
+# Quickest — one-line setup via npx (--intake defaults to --no-raw, redacted traces only)
+npx github:Salomondiei08/tracevault init --intake https://YOUR-INTAKE-URL.run.app --token tv_... \
+  --exclude /work --deny "Your Name" --deny "Company"
+npx github:Salomondiei08/tracevault preview claude-code
+npx github:Salomondiei08/tracevault sync
+```
+
 ## Deployment
 
-There is no server. It runs on each contributor's machine. A shared intake service that issues per-contributor upload links (so contributors never need bucket credentials) is planned.
+There is no required server for solo use. For teams or friends, [`intake/`](intake/Dockerfile) runs on Cloud Run (or any Node 22 container), validating per-friend bearer tokens and issuing short-lived GCS V4 signed PUT URLs locked to `contributors/<token-owner>/` with `--no-raw` enforcement.

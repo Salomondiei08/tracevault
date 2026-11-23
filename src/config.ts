@@ -1,9 +1,10 @@
 /**
  * User configuration and local state, kept in ~/.tracevault (or $TRACEVAULT_HOME).
  *
- * config.json  where to upload and what to skip (safe to share; holds no secrets)
- * state.json   what has already been uploaded, so syncs only send changes
- * raw.key      the raw-tier encryption key (never uploaded, back it up yourself)
+ * config.json   where to upload and what to skip (safe to share; holds no secrets)
+ * intake.token  optional bearer token for --intake uploads (0600, never inside config.json)
+ * state.json    what has already been uploaded, so syncs only send changes
+ * raw.key       the raw-tier encryption key (never uploaded, back it up yourself)
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
@@ -29,7 +30,11 @@ export interface LocalStorageConfig {
   type: "local";
   dir: string;
 }
-export type StorageConfig = GcsStorageConfig | S3StorageConfig | LocalStorageConfig;
+export interface IntakeStorageConfig {
+  type: "intake";
+  url: string;
+}
+export type StorageConfig = GcsStorageConfig | S3StorageConfig | LocalStorageConfig | IntakeStorageConfig;
 
 export interface Config {
   storage: StorageConfig;
@@ -49,6 +54,25 @@ export const appHome = (): string => process.env.TRACEVAULT_HOME ?? join(homedir
 export const configPath = (): string => join(appHome(), "config.json");
 export const statePath = (): string => join(appHome(), "state.json");
 export const keyPath = (): string => join(appHome(), "raw.key");
+export const intakeTokenPath = (): string => join(appHome(), "intake.token");
+
+/** Reads the contributor intake bearer token from TRACEVAULT_INTAKE_TOKEN or ~/.tracevault/intake.token. */
+export function loadIntakeToken(): string | undefined {
+  const fromEnv = process.env.TRACEVAULT_INTAKE_TOKEN?.trim();
+  if (fromEnv) return fromEnv;
+  const p = intakeTokenPath();
+  if (!existsSync(p)) return undefined;
+  const val = readFileSync(p, "utf8").trim();
+  return val || undefined;
+}
+
+/** Saves the intake bearer token with owner-only permissions outside config.json. */
+export function saveIntakeToken(token: string): void {
+  const trimmed = token.trim();
+  if (!trimmed) throw new Error("Intake token cannot be empty");
+  mkdirSync(appHome(), { recursive: true, mode: 0o700 });
+  writeFileSync(intakeTokenPath(), trimmed + "\n", { mode: 0o600 });
+}
 
 /** A default contributor id that does not reveal the username: a short hash of user + host. */
 export function defaultContributor(): string {

@@ -15,9 +15,11 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest",
-    "start": "node --no-warnings dist/cli.js"
+    "start": "node --no-warnings dist/cli.js",
+    "intake": "node --no-warnings dist/intake/cli.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1163.0",
